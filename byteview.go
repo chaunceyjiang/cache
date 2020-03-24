@@ -16,3 +16,7 @@ func (b ByteView) ByteSlice() []byte {
 	return c
 }
 
+// String 用于测试
+func (b ByteView) String() string {
+	return string(b.b)
+}

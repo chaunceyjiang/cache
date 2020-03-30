@@ -26,7 +26,7 @@ func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, err
 	}
 	if c, ok := g.m[key]; ok {
 		// 因为并发的缘故，可能会存在第一次请求还没有结束，就发起了第二次请求，因此，这里对一个请求期间的相同key的请求，复用相同结果
-		g.mu.Lock()
+		g.mu.Unlock()
 		c.wg.Wait() // 这里等待第一次的请求完成
 		return c.val, c.err
 	}

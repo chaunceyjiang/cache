@@ -2,17 +2,26 @@
 package dcache
 
 import (
+	"dcache/consistenthash"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 )
 
 const defaultBasePath = "/_cache/"
+const defaultReplicas = 3
 
 type HTTPPool struct {
 	self     string //记录自身地址
 	basePath string // 通信地址前缀
+
+	peers       *consistenthash.Map
+	mu          sync.Mutex
+	httpGetters map[string]*httpGetter
 }
 
 func NewHTTPPool(self string) *HTTPPool {
@@ -55,3 +64,59 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream") // 二进制流
 	w.Write(view.ByteSlice())
 }
+
+type httpGetter struct {
+	baseURL string
+}
+
+var _ PeerGetter = (*httpGetter)(nil)
+
+func (h *httpGetter) Get(group string, key string) ([]byte, error) {
+	u := fmt.Sprintf("%v%v/%v", h.baseURL, url.QueryEscape(group), url.QueryEscape(key))
+	log.Println("get remote dcache url",u)
+	res, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned: %v", res.StatusCode)
+	}
+
+	bytes, err := ioutil.ReadAll(res.Body)
+
+	if err != nil {
+		return nil, fmt.Errorf("reading response bidy: %v", err)
+	}
+
+	return bytes, nil
+
+}
+
+func (p *HTTPPool) Set(peers ...string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peers = consistenthash.New(defaultReplicas, nil)
+	p.peers.Add(peers...)
+	if p.httpGetters == nil {
+		p.httpGetters = make(map[string]*httpGetter, len(peers))
+	}
+	for _, peer := range peers {
+		p.httpGetters[peer] = &httpGetter{baseURL: peer + p.basePath}
+	}
+}
+
+func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// peer=="" 表示一个key都没有,表示不是自己的数据不接收peer != p.self
+	if peer := p.peers.Get(key); peer != "" && peer != p.self {
+		p.Log("Pick peer %s", peer)
+		return p.httpGetters[peer], true
+	}
+	return nil, false
+}
+
+
+var _ PeerPicker = (*HTTPPool)(nil)

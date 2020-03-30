@@ -33,6 +33,7 @@ type Group struct {
 	name      string // 缓存的名字
 	getter    Getter // 获取数据的回调函数
 	mainCache cache  // 缓存
+	pickers   PeerPicker
 }
 
 var (
@@ -91,7 +92,24 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 // load 加载数据 分别从本地，和远程加载数据
 func (g *Group) load(key string) (ByteView, error) {
+	// 如果没有注册peer，还是调用本地缓存
+	if g.pickers != nil {
+		if peer, ok := g.pickers.PickPeer(key); ok {
+			if value, err := g.getFromPeer(peer, key); err == nil {
+				return value, err
+			}
+			log.Println("[cache] Failed to get from peer")
+		}
+	}
 	return g.getLocally(key)
+}
+
+func (g *Group) getFromPeer(getter PeerGetter, key string) (ByteView, error) {
+	bytes, err := getter.Get(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+	return ByteView{b: bytes}, nil
 }
 
 // getLocally 从本地获取数据
@@ -111,4 +129,11 @@ func cloeBytes(b []byte) []byte {
 	c := make([]byte, len(b))
 	copy(c, b)
 	return c
+}
+
+func (g *Group) RegisterPeers(picker PeerPicker) {
+	if g.pickers != nil {
+		panic("RegisterPeerPicker called more than once")
+	}
+	g.pickers = picker
 }

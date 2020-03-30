@@ -1,6 +1,8 @@
 package singleflight
 
-import "sync"
+import (
+	"sync"
+)
 
 /*
   原理：
@@ -38,7 +40,8 @@ func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, err
 	g.mu.Unlock() // 快速释放锁，减少Do 阻塞的时间
 
 	c.val, c.err = fn() // 调用回调函数
-	c.wg.Done()         // 获取到调用结束后，立即释放
+	//time.Sleep(2 * time.Second) // 测试一个请求耗时非常长的想=情况
+	c.wg.Done() // 获取到调用结束后，立即释放
 
 	g.mu.Lock()
 	delete(g.m, key) // 调用结束，释放这个请求的标记

@@ -1,6 +1,7 @@
 package dcache
 
 import (
+	"dcache/singleflight"
 	"errors"
 	"log"
 	"sync"
@@ -34,6 +35,8 @@ type Group struct {
 	getter    Getter // 获取数据的回调函数
 	mainCache cache  // 缓存
 	pickers   PeerPicker
+
+	loader *singleflight.Group
 }
 
 var (
@@ -55,6 +58,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		name:      name,
 		getter:    getter,
 		mainCache: cache{cacheBytes: cacheBytes},
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	return g
@@ -92,16 +96,25 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 // load 加载数据 分别从本地，和远程加载数据
 func (g *Group) load(key string) (ByteView, error) {
-	// 如果没有注册peer，还是调用本地缓存
-	if g.pickers != nil {
-		if peer, ok := g.pickers.PickPeer(key); ok {
-			if value, err := g.getFromPeer(peer, key); err == nil {
-				return value, err
+	// 增加保护机制
+	b, err := g.loader.Do(key, func() (i interface{}, err error) {
+		// 如果没有注册peer，还是调用本地缓存
+
+		if g.pickers != nil {
+			if peer, ok := g.pickers.PickPeer(key); ok {
+				if value, err := g.getFromPeer(peer, key); err == nil {
+					return value, err
+				}
+				log.Println("[cache] Failed to get from peer")
 			}
-			log.Println("[cache] Failed to get from peer")
 		}
+		return g.getLocally(key)
+	})
+
+	if err != nil {
+		return ByteView{}, err
 	}
-	return g.getLocally(key)
+	return b.(ByteView), nil
 }
 
 func (g *Group) getFromPeer(getter PeerGetter, key string) (ByteView, error) {

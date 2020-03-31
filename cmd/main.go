@@ -2,9 +2,12 @@ package main
 
 import (
 	"dcache"
+	"dcache/cachepb"
 	"flag"
 	"fmt"
+	"google.golang.org/grpc"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -27,10 +30,23 @@ func createGroup() *dcache.Group {
 func startCacheServer(addr string, addrs []string, dc *dcache.Group) {
 	peers := dcache.NewHTTPPool(addr)
 	// HTTPPool 即实现了ServeHTTP，又实现了PeerPicker
-	peers.Set(addrs...)
+	peers.Set(dcache.HttpGetter, addrs...)
 	dc.RegisterPeers(peers)
 	log.Println("dcache is running ad ", addr)
 	log.Fatalln(http.ListenAndServe(addr[7:], peers))
+}
+
+func startRPCServer(addr string, addrs []string, dc *dcache.Group) {
+	peers := dcache.NewHTTPPool(addr)
+	peers.Set(dcache.RpcGetter, addrs...)
+	s := grpc.NewServer()
+	cachepb.RegisterGroupCacheServer(s, peers)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println("dcache is running ad rpc ", addr)
+	log.Fatalln(s.Serve(l))
 }
 
 func startAPIServer(addr string, dc *dcache.Group) {
@@ -56,9 +72,9 @@ func main() {
 	flag.Parse()
 	apiAddr := "http://localhost:9999"
 	addrMap := map[int]string{
-		8001: "http://localhost:8001",
-		8002: "http://localhost:8002",
-		8003: "http://localhost:8003",
+		8001: "localhost:8001",
+		8002: "localhost:8002",
+		8003: "localhost:8003",
 	}
 	var addrs []string
 	for _, v := range addrMap {
@@ -68,5 +84,6 @@ func main() {
 	if api {
 		go startAPIServer(apiAddr, dc)
 	}
-	startCacheServer(addrMap[port], addrs, dc)
+	//startCacheServer(addrMap[port], addrs, dc)
+	startRPCServer(addrMap[port], addrs, dc)
 }

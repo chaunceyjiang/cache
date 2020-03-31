@@ -2,8 +2,10 @@
 package dcache
 
 import (
+	"dcache/cachepb"
 	"dcache/consistenthash"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -61,8 +63,14 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := proto.Marshal(&cachepb.Response{Value: view.ByteSlice()})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/octet-stream") // 二进制流
-	w.Write(view.ByteSlice())
+	w.Write(body)
 }
 
 type httpGetter struct {
@@ -71,26 +79,29 @@ type httpGetter struct {
 
 var _ PeerGetter = (*httpGetter)(nil)
 
-func (h *httpGetter) Get(group string, key string) ([]byte, error) {
-	u := fmt.Sprintf("%v%v/%v", h.baseURL, url.QueryEscape(group), url.QueryEscape(key))
-	log.Println("get remote dcache url",u)
+func (h *httpGetter) Get(in *cachepb.Request, out *cachepb.Response) error {
+	u := fmt.Sprintf("%v%v/%v", h.baseURL, url.QueryEscape(in.GetGroup()), url.QueryEscape(in.GetKey()))
+	log.Println("get remote dcache url", u)
 	res, err := http.Get(u)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned: %v", res.StatusCode)
+		return fmt.Errorf("server returned: %v", res.StatusCode)
 	}
 
 	bytes, err := ioutil.ReadAll(res.Body)
 
 	if err != nil {
-		return nil, fmt.Errorf("reading response bidy: %v", err)
+		return fmt.Errorf("reading response bidy: %v", err)
 	}
 
-	return bytes, nil
+	if err = proto.Unmarshal(bytes, out); err != nil {
+		return fmt.Errorf("decoding response body: %v", err)
+	}
+	return nil
 
 }
 
@@ -117,6 +128,5 @@ func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
 	}
 	return nil, false
 }
-
 
 var _ PeerPicker = (*HTTPPool)(nil)

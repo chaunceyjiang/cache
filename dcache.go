@@ -1,6 +1,7 @@
 package dcache
 
 import (
+	"dcache/cachepb"
 	"dcache/singleflight"
 	"errors"
 	"log"
@@ -118,11 +119,19 @@ func (g *Group) load(key string) (ByteView, error) {
 }
 
 func (g *Group) getFromPeer(getter PeerGetter, key string) (ByteView, error) {
-	bytes, err := getter.Get(g.name, key)
+	//bytes, err := getter.Get(g.name, key)
+	//if err != nil {
+	//	return ByteView{}, err
+	//}
+	resp := &cachepb.Response{}
+	err := getter.Get(&cachepb.Request{
+		Group: g.name,
+		Key:   key,
+	}, resp)
 	if err != nil {
 		return ByteView{}, err
 	}
-	return ByteView{b: bytes}, nil
+	return ByteView{b: resp.Value}, nil
 }
 
 // getLocally 从本地获取数据
